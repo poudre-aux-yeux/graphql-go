@@ -18,12 +18,13 @@ type Response struct {
 	Errs []*errors.QueryError
 }
 
-func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) <-chan *Response {
+func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) (<-chan *Response, chan<- struct{}) {
 	if op.Type != query.Subscription {
 		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", op.Type)}})
 	}
 
 	var result reflect.Value
+	var stopCh chan<- struct{}
 	var f *fieldToExec
 	var qErr *errors.QueryError
 	func() {
@@ -45,8 +46,10 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 		}
 		callOut := f.resolver.Method(f.field.MethodIndex).Call(in)
 		result = callOut[0]
-		if f.field.HasError && !callOut[1].IsNil() {
-			resolverErr := callOut[1].Interface().(error)
+		stopCh = callOut[1].Interface().(chan<- struct{})
+
+		if f.field.HasError && !callOut[2].IsNil() {
+			resolverErr := callOut[2].Interface().(error)
 			qErr = errors.Errorf("%s", resolverErr)
 			qErr.ResolverError = resolverErr
 		}
@@ -61,10 +64,10 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 	}
 
 	c := make(chan *Response)
-	// TODO: handle resolver nil channel better?
-	if result == reflect.Zero(result.Type()) {
+	// TODO: handle resolver nil channels better?
+	if result == reflect.Zero(result.Type()) || stopCh == nil {
 		close(c)
-		return c
+		return c, make(chan<- struct{})
 	}
 
 	go func() {
@@ -94,12 +97,12 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 		}
 	}()
 
-	return c
+	return c, stopCh
 }
 
-func sendAndReturnClosed(resp *Response) chan *Response {
+func sendAndReturnClosed(resp *Response) (chan *Response, chan<- struct{}) {
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)
-	return c
+	return c, make(chan<- struct{})
 }

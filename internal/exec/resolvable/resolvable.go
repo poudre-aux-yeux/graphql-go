@@ -292,14 +292,38 @@ func (b *execBuilder) makeFieldExec(typeName string, f *schema.Field, m reflect.
 		return nil, fmt.Errorf("too many parameters")
 	}
 
-	if m.Type.NumOut() > 2 {
+	maxNumOfReturns := 2
+	isSubscription := typeName == "Subscription"
+	if isSubscription {
+		maxNumOfReturns = 3
+	}
+
+	if m.Type.NumOut() < maxNumOfReturns-1 {
+		return nil, fmt.Errorf("too few return values")
+	}
+
+	if m.Type.NumOut() > maxNumOfReturns {
 		return nil, fmt.Errorf("too many return values")
 	}
 
-	hasError := m.Type.NumOut() == 2
+	if isSubscription {
+		stopCh := m.Type.Out(1)
+		stopChErr := fmt.Errorf("second return value should be a `chan<- struct{}`")
+
+		if stopCh.Kind() != reflect.Chan || stopCh.ChanDir() != reflect.SendDir {
+			return nil, stopChErr
+		}
+
+		_, ok := reflect.New(stopCh.Elem()).Elem().Interface().(struct{})
+		if !ok {
+			return nil, stopChErr
+		}
+	}
+
+	hasError := m.Type.NumOut() == maxNumOfReturns
 	if hasError {
-		if m.Type.Out(1) != errorType {
-			return nil, fmt.Errorf(`must have "error" as its second return value`)
+		if m.Type.Out(maxNumOfReturns-1) != errorType {
+			return nil, fmt.Errorf(`must have "error" as its last return value`)
 		}
 	}
 
@@ -312,8 +336,9 @@ func (b *execBuilder) makeFieldExec(typeName string, f *schema.Field, m reflect.
 		HasError:    hasError,
 		TraceLabel:  fmt.Sprintf("GraphQL field: %s.%s", typeName, f.Name),
 	}
+
 	out := m.Type.Out(0)
-	if typeName == "Subscription" && out.Kind() == reflect.Chan {
+	if isSubscription && out.Kind() == reflect.Chan {
 		out = m.Type.Out(0).Elem()
 	}
 	if err := b.assignExec(&fe.ValueExec, f.Type, out); err != nil {

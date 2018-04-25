@@ -46,7 +46,7 @@ func RunSubscribe(t *testing.T, test *TestSubscription) {
 	if test.Context == nil {
 		test.Context = context.Background()
 	}
-	c := test.Schema.Subscribe(test.Context, test.Query, test.OperationName, test.Variables)
+	c, _ := test.Schema.Subscribe(test.Context, test.Query, test.OperationName, test.Variables)
 
 	var results []*graphql.Response
 	for res := range c {

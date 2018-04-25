@@ -24,8 +24,8 @@ type helloSaidWithErrorsResolver struct{}
 
 var resolverError = stdErrors.New("resolver error")
 
-func (r *helloSaidWithErrorsResolver) HelloSaid() (chan *helloSaidEventResolver, error) {
-	return nil, resolverError
+func (r *helloSaidWithErrorsResolver) HelloSaid() (chan *helloSaidEventResolver, chan<- struct{}, error) {
+	return nil, nil, resolverError
 }
 
 type helloSaidResolver struct{}
@@ -34,7 +34,7 @@ type helloSaidEventResolver struct {
 	msg string
 }
 
-func (r *helloSaidResolver) HelloSaid() chan *helloSaidEventResolver {
+func (r *helloSaidResolver) HelloSaid() (chan *helloSaidEventResolver, chan<- struct{}) {
 	c := make(chan *helloSaidEventResolver)
 	go func() {
 		c <- &helloSaidEventResolver{msg: "Hello world!"}
@@ -42,7 +42,7 @@ func (r *helloSaidResolver) HelloSaid() chan *helloSaidEventResolver {
 		close(c)
 	}()
 
-	return c
+	return c, make(chan<- struct{})
 }
 
 func (r *helloSaidEventResolver) Msg() string {

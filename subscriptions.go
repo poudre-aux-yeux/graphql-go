@@ -13,14 +13,14 @@ import (
 	"github.com/graph-gophers/graphql-go/introspection"
 )
 
-func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) <-chan *Response {
+func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) (<-chan *Response, chan<- struct{}) {
 	if s.res == nil {
 		panic("schema created without resolver, can not subscribe")
 	}
 	return s.subscribe(ctx, queryString, operationName, variables, s.res)
 }
 
-func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) <-chan *Response {
+func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) (<-chan *Response, chan<- struct{}) {
 	doc, qErr := query.Parse(queryString)
 	if qErr != nil {
 		return sendAndReturnClosed(&Response{Errors: []*errors.QueryError{qErr}})
@@ -58,7 +58,7 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 	}
 
 	traceCtx, finish := s.tracer.TraceQuery(ctx, queryString, operationName, variables, varTypes)
-	responses := r.Subscribe(traceCtx, res, op)
+	responses, stopCh := r.Subscribe(traceCtx, res, op)
 	finish(nil)
 
 	c := make(chan *Response)
@@ -72,12 +72,12 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 		close(c)
 	}()
 
-	return c
+	return c, stopCh
 }
 
-func sendAndReturnClosed(resp *Response) chan *Response {
+func sendAndReturnClosed(resp *Response) (chan *Response, chan<- struct{}) {
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)
-	return c
+	return c, make(chan<- struct{})
 }
