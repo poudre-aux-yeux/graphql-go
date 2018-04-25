@@ -13,7 +13,7 @@ import (
 	"github.com/graph-gophers/graphql-go/introspection"
 )
 
-func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) chan *Response {
+func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) <-chan *Response {
 	if s.res == nil {
 		panic("schema created without resolver, can not subscribe")
 	}
@@ -27,7 +27,7 @@ func sendAndReturnClosed(resp *Response) chan *Response {
 	return c
 }
 
-func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) chan *Response {
+func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) <-chan *Response {
 	doc, qErr := query.Parse(queryString)
 	if qErr != nil {
 		return sendAndReturnClosed(&Response{Errors: []*errors.QueryError{qErr}})
