@@ -1,6 +1,7 @@
 package subscriptiontest
 
 import (
+	"encoding/json"
 	stdErrors "errors"
 	"testing"
 
@@ -68,22 +69,22 @@ func TestSchemaSubscribe(t *testing.T) {
 			`,
 			ExpectedResults: []gqltesting.TestResponse{
 				{
-					Data: `
+					Data: json.RawMessage(`
 					{
 						"helloSaid": {
 							"msg": "Hello world!"
 						}
 					}
-				`,
+				`),
 				},
 				{
-					Data: `
+					Data: json.RawMessage(`
 					{
 						"helloSaid": {
 							"msg": "Hello again!"
 						}
 					}
-				`,
+				`),
 				},
 			},
 		},
@@ -103,7 +104,6 @@ func TestSchemaSubscribe_Errors(t *testing.T) {
 			ExpectedResults: []gqltesting.TestResponse{
 				{
 					Errors: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", "QUERY")},
-					Data:   `{}`,
 				},
 			},
 		},
@@ -120,7 +120,6 @@ func TestSchemaSubscribe_Errors(t *testing.T) {
 			ExpectedResults: []gqltesting.TestResponse{
 				{
 					Errors: []*errors.QueryError{errors.Errorf("%s", resolverError)},
-					Data:   `{}`,
 				},
 			},
 		},

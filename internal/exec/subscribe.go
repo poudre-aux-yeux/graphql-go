@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -13,8 +14,8 @@ import (
 )
 
 type Response struct {
-	Bytes []byte
-	Errs  []*errors.QueryError
+	Data json.RawMessage
+	Errs []*errors.QueryError
 }
 
 func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) <-chan *Response {
@@ -82,7 +83,7 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 				out.WriteString(fmt.Sprintf(`{"%s":`, f.field.Alias))
 				r.execSelectionSet(ctx, f.sels, f.field.Type, &pathSegment{nil, f.field.Alias}, obj, &out)
 				out.WriteString(`}`)
-				c <- &Response{Bytes: out.Bytes()}
+				c <- &Response{Data: out.Bytes()}
 			}()
 			if err := ctx.Err(); err != nil {
 				c <- &Response{Errs: []*errors.QueryError{errors.Errorf("%s", err)}}
@@ -97,11 +98,6 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 }
 
 func sendAndReturnClosed(resp *Response) chan *Response {
-	// TODO: fix Bytes response
-	if resp.Bytes == nil {
-		resp.Bytes = []byte(`{}`)
-	}
-
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)

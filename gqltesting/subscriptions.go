@@ -3,6 +3,7 @@ package gqltesting
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strconv"
 	"testing"
 
@@ -10,9 +11,9 @@ import (
 	"github.com/graph-gophers/graphql-go/errors"
 )
 
-// TestResponse ...
+// TestResponse models the expected response
 type TestResponse struct {
-	Data   string
+	Data   json.RawMessage
 	Errors []*errors.QueryError
 }
 

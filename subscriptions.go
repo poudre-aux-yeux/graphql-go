@@ -72,7 +72,7 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 	go func() {
 		for resp := range responses {
 			c <- &Response{
-				Data:   resp.Bytes,
+				Data:   resp.Data,
 				Errors: resp.Errs,
 			}
 		}

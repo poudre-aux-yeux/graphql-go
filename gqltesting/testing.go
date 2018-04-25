@@ -56,9 +56,14 @@ func RunTest(t *testing.T, test *Test) {
 	}
 }
 
-func formatJSON(t *testing.T, data []byte) []byte {
+func formatJSON(t *testing.T, raw json.RawMessage) []byte {
+	data, err := raw.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var v interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err = json.Unmarshal(data, &v); err != nil {
 		t.Fatalf("invalid JSON: %s", err)
 	}
 	formatted, err := json.Marshal(v)
