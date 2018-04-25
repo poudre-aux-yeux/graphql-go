@@ -25,6 +25,7 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 
 	var result reflect.Value
 	var f *fieldToExec
+	var qErr *errors.QueryError
 	func() {
 		defer r.handlePanic(ctx)
 
@@ -44,9 +45,17 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 		}
 		callOut := f.resolver.Method(f.field.MethodIndex).Call(in)
 		result = callOut[0]
+		if f.field.HasError && !callOut[1].IsNil() {
+			resolverErr := callOut[1].Interface().(error)
+			qErr = errors.Errorf("%s", resolverErr)
+			qErr.ResolverError = resolverErr
+		}
 	}()
 
-	// TODO: check error callOut[1]
+	if qErr != nil {
+		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{qErr}})
+	}
+
 	if err := ctx.Err(); err != nil {
 		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s", err)}})
 	}
