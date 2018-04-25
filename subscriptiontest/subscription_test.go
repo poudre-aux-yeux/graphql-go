@@ -1,6 +1,7 @@
 package subscriptiontest
 
 import (
+	stdErrors "errors"
 	"testing"
 
 	graphql "github.com/graph-gophers/graphql-go"
@@ -11,6 +12,19 @@ import (
 type rootResolver struct {
 	*helloSaidResolver
 	*helloResolver
+}
+
+type rootResolverWithErrors struct {
+	*helloSaidWithErrorsResolver
+	*helloResolver
+}
+
+type helloSaidWithErrorsResolver struct{}
+
+var resolverError = stdErrors.New("resolver error")
+
+func (r *helloSaidWithErrorsResolver) HelloSaid() (chan *helloSaidEventResolver, error) {
+	return nil, resolverError
 }
 
 type helloSaidResolver struct{}
@@ -41,51 +55,76 @@ func (r *helloResolver) Hello() string {
 }
 
 func TestSchemaSubscribe(t *testing.T) {
-	gqltesting.RunSubscribe(t, &gqltesting.TestSubscription{
-		Schema: graphql.MustParseSchema(schema, &rootResolver{}),
-		Query: `
+	gqltesting.RunSubscribes(t, []*gqltesting.TestSubscription{
+		{
+			Name:   "subscribe_works",
+			Schema: graphql.MustParseSchema(schema, &rootResolver{}),
+			Query: `
 				subscription onHelloSaid {
 					helloSaid {
             msg
           }
 				}
 			`,
-		ExpectedResults: []gqltesting.TestResponse{
-			{
-				Data: `
+			ExpectedResults: []gqltesting.TestResponse{
+				{
+					Data: `
 					{
 						"helloSaid": {
 							"msg": "Hello world!"
 						}
 					}
 				`,
-			},
-			{
-				Data: `
+				},
+				{
+					Data: `
 					{
 						"helloSaid": {
 							"msg": "Hello again!"
 						}
 					}
 				`,
+				},
 			},
-		}})
+		},
+	})
 }
 
 func TestSchemaSubscribe_Errors(t *testing.T) {
-	gqltesting.RunSubscribe(t, &gqltesting.TestSubscription{
-		Schema: graphql.MustParseSchema(schema, &rootResolver{}),
-		Query: `
+	gqltesting.RunSubscribes(t, []*gqltesting.TestSubscription{
+		{
+			Name:   "subscribe_to_query",
+			Schema: graphql.MustParseSchema(schema, &rootResolver{}),
+			Query: `
 				query Hello {
 					hello
 				}
 			`,
-		ExpectedResults: []gqltesting.TestResponse{
-			{
-				Errors: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", "QUERY")},
-				Data:   `{}`,
+			ExpectedResults: []gqltesting.TestResponse{
+				{
+					Errors: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", "QUERY")},
+					Data:   `{}`,
+				},
 			},
-		}})
+		},
+		{
+			Name:   "resolver_can_error",
+			Schema: graphql.MustParseSchema(schema, &rootResolverWithErrors{}),
+			Query: `
+				subscription onHelloSaid {
+					helloSaid {
+		        msg
+		      }
+				}
+			`,
+			ExpectedResults: []gqltesting.TestResponse{
+				{
+					Errors: []*errors.QueryError{errors.Errorf("%s", resolverError)},
+					Data:   `{}`,
+				},
+			},
+		},
+	})
 }
 
 const schema = `

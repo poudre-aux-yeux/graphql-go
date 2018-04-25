@@ -19,8 +19,7 @@ type Response struct {
 
 func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) <-chan *Response {
 	if op.Type != query.Subscription {
-		// TODO: fix Bytes response
-		return sendAndReturnClosed(&Response{Bytes: []byte(`{}`), Errs: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", op.Type)}})
+		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", op.Type)}})
 	}
 
 	var result reflect.Value
@@ -98,6 +97,11 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 }
 
 func sendAndReturnClosed(resp *Response) chan *Response {
+	// TODO: fix Bytes response
+	if resp.Bytes == nil {
+		resp.Bytes = []byte(`{}`)
+	}
+
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)
