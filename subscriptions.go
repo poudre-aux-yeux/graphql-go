@@ -20,13 +20,6 @@ func (s *Schema) Subscribe(ctx context.Context, queryString string, operationNam
 	return s.subscribe(ctx, queryString, operationName, variables, s.res)
 }
 
-func sendAndReturnClosed(resp *Response) chan *Response {
-	c := make(chan *Response, 1)
-	c <- resp
-	close(c)
-	return c
-}
-
 func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) <-chan *Response {
 	doc, qErr := query.Parse(queryString)
 	if qErr != nil {
@@ -79,5 +72,12 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 		close(c)
 	}()
 
+	return c
+}
+
+func sendAndReturnClosed(resp *Response) chan *Response {
+	c := make(chan *Response, 1)
+	c <- resp
+	close(c)
 	return c
 }
