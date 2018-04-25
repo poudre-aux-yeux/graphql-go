@@ -313,8 +313,7 @@ func (b *execBuilder) makeFieldExec(typeName string, f *schema.Field, m reflect.
 		TraceLabel:  fmt.Sprintf("GraphQL field: %s.%s", typeName, f.Name),
 	}
 	out := m.Type.Out(0)
-	// TODO: check if it comes from subscription
-	if out.Kind() == reflect.Chan {
+	if typeName == "Subscription" && out.Kind() == reflect.Chan {
 		out = m.Type.Out(0).Elem()
 	}
 	if err := b.assignExec(&fe.ValueExec, f.Type, out); err != nil {
