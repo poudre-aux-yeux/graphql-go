@@ -293,31 +293,12 @@ func (b *execBuilder) makeFieldExec(typeName string, f *schema.Field, m reflect.
 	}
 
 	maxNumOfReturns := 2
-	isSubscription := typeName == "Subscription"
-	if isSubscription {
-		maxNumOfReturns = 3
-	}
-
 	if m.Type.NumOut() < maxNumOfReturns-1 {
 		return nil, fmt.Errorf("too few return values")
 	}
 
 	if m.Type.NumOut() > maxNumOfReturns {
 		return nil, fmt.Errorf("too many return values")
-	}
-
-	if isSubscription {
-		stopCh := m.Type.Out(1)
-		stopChErr := fmt.Errorf("second return value should be a `chan<- struct{}`")
-
-		if stopCh.Kind() != reflect.Chan || stopCh.ChanDir() != reflect.SendDir {
-			return nil, stopChErr
-		}
-
-		_, ok := reflect.New(stopCh.Elem()).Elem().Interface().(struct{})
-		if !ok {
-			return nil, stopChErr
-		}
 	}
 
 	hasError := m.Type.NumOut() == maxNumOfReturns
@@ -338,7 +319,7 @@ func (b *execBuilder) makeFieldExec(typeName string, f *schema.Field, m reflect.
 	}
 
 	out := m.Type.Out(0)
-	if isSubscription && out.Kind() == reflect.Chan {
+	if typeName == "Subscription" && out.Kind() == reflect.Chan {
 		out = m.Type.Out(0).Elem()
 	}
 	if err := b.assignExec(&fe.ValueExec, f.Type, out); err != nil {

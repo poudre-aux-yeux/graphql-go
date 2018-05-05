@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/graph-gophers/graphql-go/errors"
 	"github.com/graph-gophers/graphql-go/internal/exec/resolvable"
@@ -13,20 +14,16 @@ import (
 	"github.com/graph-gophers/graphql-go/internal/query"
 )
 
+// TODO: un-export me
 type Response struct {
 	Data json.RawMessage
 	Errs []*errors.QueryError
 }
 
-func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) (<-chan *Response, chan<- struct{}) {
-	if op.Type != query.Subscription {
-		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s: %s", "subscription unavailable for operation of type", op.Type)}})
-	}
-
+func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query.Operation) <-chan *Response {
 	var result reflect.Value
-	var stopCh chan<- struct{}
 	var f *fieldToExec
-	var qErr *errors.QueryError
+	var err *errors.QueryError
 	func() {
 		defer r.handlePanic(ctx)
 
@@ -34,7 +31,11 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 		var fields []*fieldToExec
 		collectFieldsToResolve(sels, s.Resolver, &fields, make(map[string]*fieldToExec))
 
-		// TODO: more subscriptions at once
+		// TODO: move this check into validation.Validate
+		if len(fields) != 1 {
+			err = errors.Errorf("%s", "can't subscribe to more than one subscription at a time")
+			return
+		}
 		f = fields[0]
 
 		var in []reflect.Value
@@ -46,63 +47,102 @@ func (r *Request) Subscribe(ctx context.Context, s *resolvable.Schema, op *query
 		}
 		callOut := f.resolver.Method(f.field.MethodIndex).Call(in)
 		result = callOut[0]
-		stopCh = callOut[1].Interface().(chan<- struct{})
 
-		if f.field.HasError && !callOut[2].IsNil() {
-			resolverErr := callOut[2].Interface().(error)
-			qErr = errors.Errorf("%s", resolverErr)
-			qErr.ResolverError = resolverErr
+		if f.field.HasError && !callOut[1].IsNil() {
+			resolverErr := callOut[1].Interface().(error)
+			err = errors.Errorf("%s", resolverErr)
+			err.ResolverError = resolverErr
 		}
 	}()
 
-	if qErr != nil {
-		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{qErr}})
+	if err != nil {
+		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{err}})
 	}
 
-	if err := ctx.Err(); err != nil {
-		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s", err)}})
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return sendAndReturnClosed(&Response{Errs: []*errors.QueryError{errors.Errorf("%s", ctxErr)}})
 	}
 
 	c := make(chan *Response)
 	// TODO: handle resolver nil channels better?
-	if result == reflect.Zero(result.Type()) || stopCh == nil {
+	if result == reflect.Zero(result.Type()) {
 		close(c)
-		return c, make(chan<- struct{})
+		return c
 	}
 
 	go func() {
-		wasClosed := false
 		for {
-			ctx := context.Background()
-			func() {
-				defer r.handlePanic(ctx)
-				obj, ok := result.Recv()
+			// Check subscription context
+			chosen, resp, ok := reflect.Select([]reflect.SelectCase{
+				{
+					Dir:  reflect.SelectRecv,
+					Chan: reflect.ValueOf(ctx.Done()),
+				},
+				{
+					Dir:  reflect.SelectRecv,
+					Chan: result,
+				},
+			})
+			switch chosen {
+			// subscription context done
+			case 0:
+				close(c)
+				return
+			// upstream received
+			case 1:
+				// upstream closed
 				if !ok {
-					wasClosed = true
 					close(c)
 					return
 				}
+
+				subR := &Request{
+					Request: selected.Request{
+						Doc:    r.Request.Doc,
+						Vars:   r.Request.Vars,
+						Schema: r.Request.Schema,
+					},
+					Limiter: r.Limiter,
+					Tracer:  r.Tracer,
+					Logger:  r.Logger,
+				}
 				var out bytes.Buffer
-				out.WriteString(fmt.Sprintf(`{"%s":`, f.field.Alias))
-				r.execSelectionSet(ctx, f.sels, f.field.Type, &pathSegment{nil, f.field.Alias}, obj, &out)
-				out.WriteString(`}`)
-				c <- &Response{Data: out.Bytes()}
-			}()
-			if err := ctx.Err(); err != nil {
-				c <- &Response{Errs: []*errors.QueryError{errors.Errorf("%s", err)}}
-			}
-			if wasClosed {
-				return
+				func() {
+					// TODO: configurable timeout
+					subCtx, cancel := context.WithTimeout(ctx, time.Second)
+					defer cancel()
+
+					// resolve response
+					func() {
+						defer subR.handlePanic(subCtx)
+
+						out.WriteString(fmt.Sprintf(`{"%s":`, f.field.Alias))
+						subR.execSelectionSet(subCtx, f.sels, f.field.Type, &pathSegment{nil, f.field.Alias}, resp, &out)
+						out.WriteString(`}`)
+					}()
+
+					if err := subCtx.Err(); err != nil {
+						c <- &Response{Errs: []*errors.QueryError{errors.Errorf("%s", err)}}
+						return
+					}
+
+					// Send response within timeout
+					// TODO: maybe block until sent?
+					select {
+					case <-subCtx.Done():
+					case c <- &Response{Data: out.Bytes(), Errs: subR.Errs}:
+					}
+				}()
 			}
 		}
 	}()
 
-	return c, stopCh
+	return c
 }
 
-func sendAndReturnClosed(resp *Response) (chan *Response, chan<- struct{}) {
+func sendAndReturnClosed(resp *Response) chan *Response {
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)
-	return c, make(chan<- struct{})
+	return c
 }

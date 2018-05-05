@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"context"
+	stdErrors "errors"
 
 	"github.com/graph-gophers/graphql-go/errors"
 	"github.com/graph-gophers/graphql-go/internal/common"
@@ -13,14 +14,19 @@ import (
 	"github.com/graph-gophers/graphql-go/introspection"
 )
 
-func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) (<-chan *Response, chan<- struct{}) {
+// Subscribe returns a response channel for the given query with the schema's
+// resolver. It returns an error if the schema was created without a resolver.
+// If the context gets cancelled, the response channel will be closed and no
+// further resolvers will be called. The context error will be returned as soon
+// as possible (not immediately).
+func (s *Schema) Subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}) (<-chan *Response, error) {
 	if s.res == nil {
-		panic("schema created without resolver, can not subscribe")
+		return nil, stdErrors.New("schema created without resolver, can not subscribe")
 	}
-	return s.subscribe(ctx, queryString, operationName, variables, s.res)
+	return s.subscribe(ctx, queryString, operationName, variables, s.res), nil
 }
 
-func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) (<-chan *Response, chan<- struct{}) {
+func (s *Schema) subscribe(ctx context.Context, queryString string, operationName string, variables map[string]interface{}, res *resolvable.Schema) <-chan *Response {
 	doc, qErr := query.Parse(queryString)
 	if qErr != nil {
 		return sendAndReturnClosed(&Response{Errors: []*errors.QueryError{qErr}})
@@ -57,10 +63,7 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 		varTypes[v.Name.Name] = introspection.WrapType(t)
 	}
 
-	traceCtx, finish := s.tracer.TraceQuery(ctx, queryString, operationName, variables, varTypes)
-	responses, stopCh := r.Subscribe(traceCtx, res, op)
-	finish(nil)
-
+	responses := r.Subscribe(ctx, res, op)
 	c := make(chan *Response)
 	go func() {
 		for resp := range responses {
@@ -72,12 +75,12 @@ func (s *Schema) subscribe(ctx context.Context, queryString string, operationNam
 		close(c)
 	}()
 
-	return c, stopCh
+	return c
 }
 
-func sendAndReturnClosed(resp *Response) (chan *Response, chan<- struct{}) {
+func sendAndReturnClosed(resp *Response) chan *Response {
 	c := make(chan *Response, 1)
 	c <- resp
 	close(c)
-	return c, make(chan<- struct{})
+	return c
 }
